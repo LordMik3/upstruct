@@ -1,4 +1,4 @@
-# upstruct [![GoDoc](http://img.shields.io/badge/go-documentation-blue.svg?style=flat-square)](http://godoc.org/github.com/hackirby/upstruct)
+# upstruct [![GoDoc](http://img.shields.io/badge/go-documentation-blue.svg?style=flat-square)](https://pkg.go.dev/github.com/LordMik3/upstruct)
 
 upstruct is an utility package to update a golang struct with another one
 
