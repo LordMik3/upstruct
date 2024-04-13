@@ -6,6 +6,25 @@ import (
 	"github.com/fatih/structs"
 )
 
+type UpdateStructHandler func(target, update *structs.Field)
+
+type UpdateStructOptions struct {
+	TargetType string `validate:"required_without=Kind"`
+	UpdateType string `validate:"required_with=TargetType"`
+
+	SameKind bool   `validate:"required_with=Kind"`
+	Kind     string `validate:"required_without=TargetType"`
+
+	SkipOuter bool
+	Handler   UpdateStructHandler `validate:"required"`
+}
+
+func getLogger() {}
+
+func transferStructData() {}
+
+func transferVariableData() {}
+
 func Update(target any, update any) error {
 	if !structs.IsStruct(target) || !structs.IsStruct(update) {
 		return errors.New("arguments must be structs")
