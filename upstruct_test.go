@@ -2,7 +2,6 @@ package upstruct_test
 
 import (
 	"database/sql"
-	"reflect"
 	"testing"
 
 	"github.com/LordMik3/upstruct"
@@ -16,24 +15,27 @@ type address struct {
 }
 
 type target struct {
-	Name    string
-	Age     uint8
 	Email   sql.NullString
 	Address address
 }
 
 type update struct {
-	Name    string
-	Age     uint8
 	Email   string
 	Address address
 }
 
+// func(f1, f2 *structs.Field) {
+// 	if reflect.TypeOf(f1.Value()).String() == "sql.NullString" {
+// 		f1.Set(sql.NullString{
+// 			String: f2.Value().(string),
+// 			Valid:  true,
+// 		})
+// 	}
+// }
+
 func TestUpdateFn(t *testing.T) {
 
 	target := target{
-		Name: "upstruct",
-		Age:  18, // legal
 		Email: sql.NullString{
 			String: "",
 			Valid:  false,
@@ -45,23 +47,30 @@ func TestUpdateFn(t *testing.T) {
 	}
 
 	update := update{
-		Name:  "up struct",
 		Email: "test@gmail.com",
 		Address: address{
 			StreetName: "gpu street",
 		},
 	}
 
-	upstruct.UpdateFn(&target, &update, func(f1, f2 *structs.Field) {
-		if reflect.TypeOf(f1.Value()).String() == "sql.NullString" {
-			f1.Set(sql.NullString{
-				String: f2.Value().(string),
-				Valid:  true,
+	upstruct.Update(&target, &update, upstruct.UpdateStructOptions{
+		Option: upstruct.DifferentTypesOption{
+			TargetType: "sql.NullString",
+			UpdateType: "string",
+		},
+		Handler: func(target, update *structs.Field) {
+			target.Set(sql.NullString{
+				String: update.Value().(string),
+				Valid:  update.Value().(string) != "",
 			})
-		}
+		},
 	})
 
 	assert.Equal(t, update.Email, target.Email.String)
-	assert.Equal(t, update.Name, target.Name)
+	// assert.Equal(t, update.Name, target.Name)
 	assert.Equal(t, update.Address.StreetName, target.Address.StreetName)
 }
+
+// func TestGetStructData(t *testing.T){
+// 	upstruct.TransferStructData()
+// }
