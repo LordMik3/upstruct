@@ -2,16 +2,15 @@ package upstruct
 
 import (
 	"errors"
-	"os"
 	"reflect"
 	"strings"
 
 	"github.com/fatih/structs"
-	"github.com/rs/zerolog"
 )
 
 type UpdateOption interface {
 	IsValid() (bool, error)
+	IsConditionMet(targetValue interface{}, updateValue interface{}) bool
 }
 
 type DifferentTypesOption struct {
@@ -29,6 +28,10 @@ func (d DifferentTypesOption) IsValid() (bool, error) {
 	return true, nil
 }
 
+func (d DifferentTypesOption) IsConditionMet(targetValue interface{}, updateValue interface{}) bool {
+	return d.TargetType == reflect.TypeOf(targetValue).String() && d.UpdateType == reflect.TypeOf(updateValue).String()
+}
+
 type SameKindOption struct {
 	Kind reflect.Kind
 }
@@ -41,6 +44,10 @@ func (s SameKindOption) IsValid() (bool, error) {
 	return true, nil
 }
 
+func (d SameKindOption) IsConditionMet(targetValue interface{}, updateValue interface{}) bool {
+	return d.Kind == reflect.ValueOf(targetValue).Kind() && d.Kind == reflect.ValueOf(updateValue).Kind()
+}
+
 // ------------------------------------------------
 
 type OptionHandler func(target, update *structs.Field)
@@ -50,33 +57,53 @@ type UpdateStructOptions struct {
 	Handler OptionHandler
 }
 
-func NewUpdateStructOption[T UpdateOption](updateOption T, handler OptionHandler) *UpdateStructOptions {
-	return &UpdateStructOptions{
-		Option:  updateOption,
-		Handler: handler,
-	}
-}
-
 // --------------------------------------------------
 
-func getLogger() zerolog.Logger {
-	return zerolog.New(zerolog.ConsoleWriter{
-		Out: os.Stdout,
-	}).
-		With().
-		Caller().
-		Timestamp().
-		Logger()
+func extractFields(x any, isTarget bool) (*reflect.Value, []*structs.Field) {
+	y := reflect.ValueOf(x)
+
+	if y.Elem().Kind() == reflect.Interface {
+		elem := y.Elem().Elem()
+
+		if isTarget {
+			newValue := reflect.New(elem.Type())
+			return &newValue, structs.Fields(newValue.Interface())
+		}
+
+		return nil, structs.Fields(elem.Interface())
+	}
+
+	return nil, structs.Fields(x)
 }
 
-func Update(target any, update any, fieldHandler ...UpdateStructOptions) error {
-	logger := getLogger()
-	if !structs.IsStruct(target) || !structs.IsStruct(update) {
+func isStruct(s any) bool {
+
+	v := reflect.ValueOf(s)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	if v.Kind() == reflect.Interface {
+		v = v.Elem()
+	}
+
+	// uninitialized zero value of a struct
+	if v.Kind() == reflect.Invalid {
+		return false
+	}
+
+	return v.Kind() == reflect.Struct
+}
+
+func Update(target any, update any, fieldHandlers ...UpdateStructOptions) error {
+	// logger := getLogger()
+
+	if !isStruct(target) || !isStruct(update) {
 		return errors.New("arguments must be structs")
 	}
 
-	targetFields := structs.Fields(target)
-	updateFields := structs.Fields(update)
+	structVal, targetFields := extractFields(target, true)
+	_, updateFields := extractFields(update, false)
 
 	for _, targetField := range targetFields {
 	InnerLoop:
@@ -85,53 +112,45 @@ func Update(target any, update any, fieldHandler ...UpdateStructOptions) error {
 				continue
 			}
 
-			for _, handler := range fieldHandler {
+			for _, handler := range fieldHandlers {
 				_, err := handler.Option.IsValid()
 				if err != nil {
 					return err
 				}
 
-				conditionMet := false
-
-				value, ok := handler.Option.(SameKindOption)
-				if !ok {
-					value, _ := handler.Option.(DifferentTypesOption)
-					if value.TargetType == reflect.TypeOf(targetField.Value()).String() &&
-						value.UpdateType == reflect.TypeOf(updateField.Value()).String() {
-						conditionMet = true
-					}
-				}
-
-				if value.Kind == targetField.Kind() && value.Kind == updateField.Kind() {
-					conditionMet = true
-				}
-
-				if conditionMet {
+				if handler.Option.IsConditionMet(targetField.Value(), updateField.Value()) {
 					handler.Handler(targetField, updateField)
 					break InnerLoop
 				}
 			}
 
 			if structs.IsStruct(targetField.Value()) && structs.IsStruct(updateField.Value()) {
-				targetFieldAny, _ := targetField.Value().(any)
-				updateFieldAny, _ := updateField.Value().(any)
+				targetFieldValue := targetField.Value()
+				updateFieldValue := updateField.Value()
+				Update(&targetFieldValue, &updateFieldValue, fieldHandlers...)
 
-				// TODO: fix the interface type shit 
-				Update(&targetFieldAny, &updateFieldAny, fieldHandler...)
-				logger.Info().Msgf("targetField new value=%+v", targetFieldAny)
-				logger.Info().Msgf("updateField value=%+v", updateFieldAny)
-				targetField.Set(targetFieldAny)
+				targetFieldReflectValue := reflect.ValueOf(targetFieldValue)
+
+				if targetFieldReflectValue.Kind() == reflect.Ptr {
+					targetFieldReflectValue = targetFieldReflectValue.Elem()
+				}
+
+				targetField.Set(targetFieldReflectValue.Interface())
 				break
 			}
 
 			if !updateField.IsZero() && targetField.Kind() == updateField.Kind() {
-				logger.Info().Msgf("targetField name=%s", targetField.Name())
-				logger.Info().Msgf("updateField name=%s", updateField.Name())
 				targetField.Set(updateField.Value())
 			}
 
 			break
 		}
+	}
+
+	if structVal != nil {
+		targetElem := reflect.ValueOf(target).Elem()
+
+		targetElem.Set(*structVal)
 	}
 
 	return nil
