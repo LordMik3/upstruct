@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/fatih/structs"
 )
@@ -52,7 +53,7 @@ func (d SameKindOption) IsConditionMet(targetValue interface{}, updateValue inte
 
 type OptionHandler func(target, update *structs.Field)
 
-type UpdateStructOptions struct {
+type UpdateStructOption struct {
 	Option  UpdateOption
 	Handler OptionHandler
 }
@@ -95,9 +96,37 @@ func isStruct(s any) bool {
 	return v.Kind() == reflect.Struct
 }
 
-func Update(target any, update any, fieldHandlers ...UpdateStructOptions) error {
-	// logger := getLogger()
+func isStructZero(s any) bool {
+	v := reflect.ValueOf(s)
 
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	if v.Kind() == reflect.Interface {
+		v = v.Elem()
+	}
+
+	fields := structs.Fields(v.Interface())
+
+	for _, field := range fields {
+		value, ok := field.Value().(time.Time)
+
+		if ok {
+			if !value.IsZero() {
+				return false
+			}
+		} else {
+			if !field.IsZero() {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func Update(target any, update any, fieldHandlers ...UpdateStructOption) error {
 	if !isStruct(target) || !isStruct(update) {
 		return errors.New("arguments must be structs")
 	}
@@ -150,7 +179,9 @@ func Update(target any, update any, fieldHandlers ...UpdateStructOptions) error 
 	if structVal != nil {
 		targetElem := reflect.ValueOf(target).Elem()
 
-		targetElem.Set(*structVal)
+		if !isStructZero(structVal.Interface()) {
+			targetElem.Set(*structVal)
+		}
 	}
 
 	return nil
